@@ -1,5 +1,5 @@
 (defsystem "sql-query-postgres"
-  :version "0.1.0"
+  :version "0.2.0"
   :description "sql-query dialect backend — PostgreSQL"
   :author "egao1980"
   :license "MIT"
