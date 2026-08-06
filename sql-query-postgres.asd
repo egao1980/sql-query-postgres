@@ -8,7 +8,8 @@
   :pathname "src"
   :components ((:file "package")
                (:file "extensions")
-               (:file "dialect"))
+               (:file "dialect")
+               (:file "vendor"))
   :in-order-to ((test-op (test-op "sql-query-postgres/tests"))))
 
 (defsystem "sql-query-postgres/tests"
