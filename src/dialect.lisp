@@ -53,7 +53,12 @@
   (emit-column-list dialect items stream ctx))
 
 (defmethod emit-for-update ((dialect postgres-dialect) clause stream ctx)
-  (write-string " FOR UPDATE" stream)
+  (write-string (ecase (or (for-update-strength clause) :update)
+                  (:update " FOR UPDATE")
+                  (:no-key-update " FOR NO KEY UPDATE")
+                  (:share " FOR SHARE")
+                  (:key-share " FOR KEY SHARE"))
+                stream)
   (when (for-update-of clause)
     (write-string " OF " stream)
     (emit-column-list dialect (for-update-of clause) stream ctx))
@@ -239,19 +244,44 @@
            (when rest (write-string ", " stream)))
   (write-char #\) stream))
 
-(defmethod emit-create-type ((dialect postgres-dialect) stmt stream ctx)
-  (ecase (create-type-kind stmt)
-    ((:distinct :structured)
-     (call-next-method))
-    (:enum
-     (write-string "CREATE TYPE " stream)
-     (when (create-type-if-not-exists stmt) (write-string "IF NOT EXISTS " stream))
-     (emit-ident dialect (create-type-name stmt) stream)
-     (write-string " AS ENUM (" stream)
-     (loop for (label . rest) on (create-type-enum-labels stmt)
-           do (emit-sql dialect (lit label) stream ctx)
-              (when rest (write-string ", " stream)))
-     (write-char #\) stream))))
+(defmethod emit-create-type-kind ((dialect postgres-dialect) (kind (eql :enum))
+                                  stmt stream ctx)
+  (write-string "CREATE TYPE " stream)
+  (when (create-type-if-not-exists stmt) (write-string "IF NOT EXISTS " stream))
+  (emit-ident dialect (create-type-name stmt) stream)
+  (write-string " AS ENUM (" stream)
+  (loop for (label . rest) on (create-type-enum-labels stmt)
+        do (emit-sql dialect (lit label) stream ctx)
+           (when rest (write-string ", " stream)))
+  (write-char #\) stream))
+
+(defmethod emit-create-type-kind ((dialect postgres-dialect) (kind (eql :base))
+                                  stmt stream ctx)
+  "Postgres base-type CREATE TYPE name (INPUT = …, OUTPUT = …, …)."
+  (write-string "CREATE TYPE " stream)
+  (when (create-type-if-not-exists stmt) (write-string "IF NOT EXISTS " stream))
+  (emit-ident dialect (create-type-name stmt) stream)
+  (write-string " (" stream)
+  (let ((opts (create-type-base-options stmt))
+        (first t))
+    (unless opts
+      (error 'sql-dialect-unsupported
+             :feature :create-type-base
+             :dialect dialect
+             :message "CREATE TYPE :base requires :base-options plist"))
+    (loop for (k v) on opts by #'cddr
+          do (unless first (write-string ", " stream))
+             (setf first nil)
+             (write-string (string-upcase (substitute #\_ #\- (symbol-name k))) stream)
+             (write-string " = " stream)
+             (cond
+               ((stringp v) (emit-sql dialect (lit v) stream ctx))
+               ((symbolp v) (emit-ident dialect v stream))
+               ((integerp v) (format stream "~d" v))
+               ((null v) (write-string "NULL" stream))
+               ((eq v t) (write-string "true" stream))
+               (t (emit-sql dialect (ensure-expr v) stream ctx)))))
+  (write-char #\) stream))
 
 (defmethod emit-alter-type-action ((dialect postgres-dialect)
                                    (action add-enum-value-clause) stream ctx)

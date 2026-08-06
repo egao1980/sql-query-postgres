@@ -138,3 +138,104 @@
                                        :dialect (make-postgres-dialect)))))
     (ok (search "CREATE TYPE" sql))
     (ok (search "AS NUMERIC" sql))))
+
+;;; ---- Vendor SQL gaps ----
+
+(deftest postgres-on-conflict-do-nothing
+  (let* ((d (make-postgres-dialect))
+         (sql (%sql (insert-into :users (columns :email) (sql-values "a@b.c")
+                                 (on-conflict :target '(:email) :action :nothing))
+                    d)))
+    (%assert-contains sql "INSERT INTO" "ON CONFLICT" "DO NOTHING")
+    (ok (search "\"email\"" sql))))
+
+(deftest postgres-on-conflict-do-update-returning
+  (let* ((d (make-postgres-dialect))
+         (sql (%sql (insert-into :users
+                      (columns :email :name)
+                      (sql-values "a@b.c" "ada")
+                      (on-conflict :target '(:email)
+                                   :action :update
+                                   :set (list (:= :name "ada")))
+                      (returning :id :email))
+                    d)))
+    (%assert-contains sql "ON CONFLICT" "DO UPDATE SET" "RETURNING")
+    (ok (< (search "ON CONFLICT" sql) (search "RETURNING" sql)))))
+
+(deftest postgres-on-conflict-constraint
+  (let ((sql (%sql (insert-into :t (columns :a) (sql-values 1)
+                                (on-conflict :constraint :t-a-key :action :nothing)))))
+    (%assert-contains sql "ON CONFLICT ON CONSTRAINT" "DO NOTHING")))
+
+(deftest postgres-copy-csv-stdin
+  (let ((sql (%sql (copy-table :users :columns '(:id :name)
+                               :direction :from :source :stdin
+                               :format :csv
+                               :options '(:header t :delimiter ",")))))
+    (%assert-contains sql "COPY" "FROM STDIN" "WITH" "FORMAT CSV" "HEADER" "DELIMITER")))
+
+(deftest postgres-copy-to-stdout
+  (let ((sql (%sql (copy-table :users :direction :to :source :stdout :format :text))))
+    (%assert-contains sql "COPY" "TO STDOUT" "FORMAT TEXT")))
+
+(deftest postgres-materialized-view
+  (let* ((d (make-postgres-dialect))
+         (create (%sql (create-materialized-view :mv
+                          (select (columns :id) (from :t))
+                          :if-not-exists t)
+                       d))
+         (drop (%sql (drop-materialized-view :mv :if-exists t :cascade t) d))
+         (refresh (%sql (refresh-materialized-view :mv :concurrently t) d)))
+    (%assert-contains create "CREATE MATERIALIZED VIEW" "IF NOT EXISTS" "WITH DATA")
+    (%assert-contains drop "DROP MATERIALIZED VIEW" "IF EXISTS" "CASCADE")
+    (%assert-contains refresh "REFRESH MATERIALIZED VIEW" "CONCURRENTLY")))
+
+(deftest postgres-partition-by-and-partition-of
+  (let* ((d (make-postgres-dialect))
+         (parent (%sql (create-table :meas
+                          (column :logdate :type :date)
+                          (column :peaktemp :type :integer)
+                          (partition-by :range :logdate))
+                       d))
+         (child (%sql (create-table-partition-of :meas-y2024 :meas
+                          :for-values '(:from ("2024-01-01") :to ("2025-01-01")))
+                      d))
+         (list-part (%sql (create-table-partition-of :meas-eu :meas
+                              :for-values '(:in "EU" "UK"))
+                          d))
+         (hash-part (%sql (create-table-partition-of :meas-h0 :meas
+                              :for-values '(:modulus 4 :remainder 0))
+                          d)))
+    (%assert-contains parent "PARTITION BY RANGE")
+    (%assert-contains child "PARTITION OF" "FOR VALUES FROM" "TO")
+    (%assert-contains list-part "FOR VALUES IN")
+    (%assert-contains hash-part "MODULUS" "REMAINDER")))
+
+(deftest postgres-create-trigger-execute-function
+  (let ((sql (%sql (create-trigger :trg
+                     :timing :after
+                     :events '(:insert)
+                     :table :users
+                     :for-each :row
+                     :function :users-audit))))
+    (%assert-contains sql "CREATE TRIGGER" "AFTER INSERT" "FOR EACH ROW"
+                      "EXECUTE FUNCTION")))
+
+(deftest postgres-for-share-and-strengths
+  (let ((d (make-postgres-dialect)))
+    (%assert-contains (%sql (select (columns :id) (from :t) (for-share)) d)
+                      "FOR SHARE")
+    (%assert-contains (%sql (select (columns :id) (from :t)
+                                    (for-update :strength :key-share :nowait t))
+                            d)
+                      "FOR KEY SHARE" "NOWAIT")
+    (%assert-contains (%sql (select (columns :id) (from :t)
+                                    (for-update :strength :no-key-update))
+                            d)
+                      "FOR NO KEY UPDATE")))
+
+(deftest postgres-vendor-extension-registry
+  (ok (find-sql-extension :on-conflict))
+  (ok (find-sql-extension :copy-table))
+  (ok (find-sql-extension :partition-by))
+  (ok (typep (make-sql-extension :on-conflict :action :nothing) 'on-conflict-clause)))
