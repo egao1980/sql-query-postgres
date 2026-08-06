@@ -17,7 +17,7 @@ env:
   CL_REPOSITORY_CLIENT_VERSION: "0.11.0"
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   # Flip to main after sql-query split PR merges.
-  SQL_QUERY_REF: cursor/split-sql-query-backends-3a7a
+  SQL_QUERY_REF: cursor/sql-type-ddl-3a7a
 
 jobs:
   test:

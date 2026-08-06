@@ -115,3 +115,26 @@
     (%assert-absent sql "END WHILE" "LEAVE")
     (ng (search "$1" sql) "no bind placeholders ($$ is plpgsql quoting)")
     (ok (null (nth-value 1 (compile-sql stmt :dialect d))))))
+
+(deftest create-type-enum-postgres
+  (let* ((d (make-postgres-dialect))
+         (sql (nth-value 0 (compile-sql
+                            (create-type :mood :enum '("sad" "ok" "happy"))
+                            :dialect d)))
+         (alter (nth-value 0 (compile-sql
+                              (alter-type :mood (add-enum-value "meh" :after "ok"))
+                              :dialect d))))
+    (ok (search "CREATE TYPE" sql))
+    (ok (search "AS ENUM" sql))
+    (ok (search "'sad'" sql))
+    (ok (search "'happy'" sql))
+    (ok (search "ALTER TYPE" alter))
+    (ok (search "ADD VALUE" alter))
+    (ok (search "'meh'" alter))
+    (ok (search "AFTER" alter))))
+
+(deftest create-type-distinct-postgres
+  (let ((sql (nth-value 0 (compile-sql (create-type :euros :as :numeric)
+                                       :dialect (make-postgres-dialect)))))
+    (ok (search "CREATE TYPE" sql))
+    (ok (search "AS NUMERIC" sql))))

@@ -239,6 +239,33 @@
            (when rest (write-string ", " stream)))
   (write-char #\) stream))
 
+(defmethod emit-create-type ((dialect postgres-dialect) stmt stream ctx)
+  (ecase (create-type-kind stmt)
+    ((:distinct :structured)
+     (call-next-method))
+    (:enum
+     (write-string "CREATE TYPE " stream)
+     (when (create-type-if-not-exists stmt) (write-string "IF NOT EXISTS " stream))
+     (emit-ident dialect (create-type-name stmt) stream)
+     (write-string " AS ENUM (" stream)
+     (loop for (label . rest) on (create-type-enum-labels stmt)
+           do (emit-sql dialect (lit label) stream ctx)
+              (when rest (write-string ", " stream)))
+     (write-char #\) stream))))
+
+(defmethod emit-alter-type-action ((dialect postgres-dialect)
+                                   (action add-enum-value-clause) stream ctx)
+  (write-string "ADD VALUE " stream)
+  (when (add-enum-value-if-not-exists action) (write-string "IF NOT EXISTS " stream))
+  (emit-sql dialect (lit (add-enum-value-label action)) stream ctx)
+  (cond
+    ((add-enum-value-before action)
+     (write-string " BEFORE " stream)
+     (emit-sql dialect (lit (string (add-enum-value-before action))) stream ctx))
+    ((add-enum-value-after action)
+     (write-string " AFTER " stream)
+     (emit-sql dialect (lit (string (add-enum-value-after action))) stream ctx))))
+
 (defmethod initialize-instance :after ((dialect postgres-dialect) &key)
   (register-postgres-extensions dialect))
 
